@@ -1,7 +1,10 @@
-FROM nginx:1.21
+FROM ubuntu:20.04
 
-COPY nginx.conf /etc/nginx/nginx.conf
-COPY hello.html /usr/share/nginx/proxy/
-COPY oidc-auth  /usr/local/bin/
+RUN apt update && apt install -y ca-certificates
 
-CMD ["sh", "-c", "nginx ; /usr/local/bin/oidc-auth"]
+COPY oidc-auth /usr/local/bin/
+COPY key.pem cert.pem /etc/
+
+EXPOSE 8443
+
+CMD ["/usr/local/bin/oidc-auth"]

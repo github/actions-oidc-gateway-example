@@ -1,6 +1,3 @@
-// curl --unix-socket /tmp/oidc-auth.socket http://test
-// https://medium.com/@mlowicki/http-s-proxy-in-golang-in-less-than-100-lines-of-code-6a51c2f2c38c
-
 package main
 
 import (
@@ -8,66 +5,62 @@ import (
     "encoding/base64"
     "encoding/json"
     "fmt"
+    "io"
     "io/ioutil"
     "math/big"
     "net"
     "net/http"
-    "os"
-    "strings"
+    "time"
 
     "github.com/golang-jwt/jwt"
 )
 
 type JWK struct {
-    n string
-    kty string
-    kid string
-    alg string
-    e string
-    use string
-    x5c []string
-    x5t string
+    N string
+    Kty string
+    Kid string
+    Alg string
+    E string
+    Use string
+    X5c []string
+    X5t string
 }
 
 type JWKS struct {
-    keys []JWK
+    Keys []JWK
 }
 
 func getKeyForToken(token *jwt.Token) (interface{}, error) {
-    // https://github.com/golang-jwt/jwt
     if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
         return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
     }
 
     resp, err := http.Get("https://token.actions.githubusercontent.com/.well-known/jwks")
     if err != nil {
+        fmt.Println(err)
         return nil, fmt.Errorf("Unable to get JWKS configuration")
     }
 
     jwksString, err := ioutil.ReadAll(resp.Body)
     if err != nil {
+        fmt.Println(err)
         return nil, fmt.Errorf("Unable to get JWKS configuration")
     }
 
-    // https://gobyexample.com/json
     var jwks JWKS
     if err = json.Unmarshal(jwksString, &jwks); err != nil {
         return nil, fmt.Errorf("Unable to parse JWKS")
     }
 
-    for _, jwk := range jwks.keys {
-        if jwk.kid == token.Header["kid"] {
-            // TODO: should we do something with x5c / x5t?
-
-            // https://github.com/lestrrat-go/jwx/blob/main/jwk/jwk.go
-            // https://pkg.go.dev/crypto/rsa#PublicKey
-            nBytes, err := base64.RawURLEncoding.DecodeString(jwk.n)
+    for _, jwk := range jwks.Keys {
+        if jwk.Kid == token.Header["kid"] {
+            nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
             if err != nil {
                 return nil, fmt.Errorf("Unable to parse key")
             }
             var n big.Int
 
-            eBytes, err := base64.RawURLEncoding.DecodeString(jwk.e)
+            eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
             if err != nil {
                 return nil, fmt.Errorf("Unable to parse key")
             }
@@ -78,7 +71,7 @@ func getKeyForToken(token *jwt.Token) (interface{}, error) {
                 E: int(e.SetBytes(eBytes).Uint64()),
             }
 
-            return key, nil
+            return &key, nil
         }
     }
 
@@ -92,67 +85,73 @@ func handler(w http.ResponseWriter, req *http.Request) {
         return
     }
 
-    fmt.Println("In handler")
-    authorizationHeader := req.Header.Get("Authorization")
-
-    if !strings.HasPrefix(authorizationHeader, "Basic ") {
-        fmt.Println("Authorization header malformed")
-        http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-        return
-    }
-
-    userPass, err := base64.StdEncoding.DecodeString(authorizationHeader[len("Basic "):])
-    if err != nil {
-        fmt.Println("Authorization header malformed")
-        http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-        return
-    }
-
-    if !strings.Contains(string(userPass), ":") {
-        fmt.Println("Authorization header malformed")
-        http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-        return
-    }
-
-    pass := strings.Split(string(userPass), ":")[1]
-
-    oidcTokenString, err := base64.StdEncoding.DecodeString(pass)
-    if err != nil {
-        fmt.Println("Authorization information malformed")
-        http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-        return
-    }
+    oidcTokenString := req.Header.Get("Proxy-Authorization")
 
     oidcToken, err := jwt.Parse(string(oidcTokenString), getKeyForToken)
-    if err != nil {
-        fmt.Println(err)
+    if err != nil || !oidcToken.Valid {
+        fmt.Println("Unable to validate JWT")
         http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
         return
     }
 
-    fmt.Println(oidcToken.Claims)
+    claims, ok := oidcToken.Claims.(jwt.MapClaims)
+    if !ok {
+        fmt.Println("Unable to map JWT claims")
+        http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+        return
+    }
 
-    // TODO: check claims in token per https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#understanding-the-oidc-token
+    // NOTE: you *must* add conditions that filter incoming requests, so that
+    // untrusted repositories or workflows can’t access your resources
+    //
+    // See https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-oidc-trust-with-the-cloud
+    if claims["repository"] != "steiza/actions_testing" {
+        http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+        return
+    }
 
-    // TODO: do the proxying here
+    proxyConn, err := net.DialTimeout("tcp", req.Host, 5*time.Second)
+    if err != nil {
+        fmt.Println(err)
+        http.Error(w, http.StatusText(http.StatusRequestTimeout), http.StatusRequestTimeout)
+        return
+    }
 
-    w.Write([]byte("OK"))
+    w.WriteHeader(http.StatusOK)
+
+    hijacker, ok := w.(http.Hijacker)
+    if !ok {
+        fmt.Println("Connection hijacking not supported")
+        http.Error(w, http.StatusText(http.StatusExpectationFailed), http.StatusExpectationFailed)
+        return
+    }
+
+    reqConn, _, err := hijacker.Hijack()
+    if err != nil {
+        fmt.Println(err)
+        http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+        return
+    }
+
+    go transfer(proxyConn, reqConn)
+    go transfer(reqConn, proxyConn)
+}
+
+func transfer(destination io.WriteCloser, source io.ReadCloser) {
+    defer destination.Close()
+    defer source.Close()
+    io.Copy(destination, source)
 }
 
 func main() {
     fmt.Println("starting up")
-    os.Remove("/tmp/oidc-auth.socket")
 
     server := http.Server{
+        Addr: ":8443",
         Handler: http.HandlerFunc(handler),
+        ReadTimeout: 60 * time.Second,
+        WriteTimeout: 60 * time.Second,
     }
 
-    unixListener, err := net.Listen("unix", "/tmp/oidc-auth.socket")
-    if err != nil {
-        panic(err)
-    }
-
-    err = os.Chown("/tmp/oidc-auth.socket", 101, 101)
-
-    server.Serve(unixListener)
+    server.ListenAndServeTLS("/etc/cert.pem", "/etc/key.pem")
 }
