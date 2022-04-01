@@ -2,15 +2,15 @@
 
 Have you ever wanted to connect to a private network from a GitHub-hosted Actions runner?
 
-This proxy is designed to be an internet-facing gateway for proxying network traffic into a private network, authorized by the OIDC token in Actions:
+This gateway is designed to be an internet-facing gateway for proxying network traffic into a private network, authorized by the OIDC token in Actions:
 
 ```
 
-    GitHub Actions   |                     |     Private Network
+    GitHub Actions   |                     |       Private Network
                      |                     |
-     ----------      |   Actions      ------------       -----------------
-    |  Runner  | ----|-- OIDC    --> | This Proxy |---> | Private Service |
-     ----------      |   Token        ------------       -----------------
+     ----------      |   Actions      --------------       -----------------
+    |  Runner  | ----|-- OIDC    --> | This Gateway |---> | Private Service |
+     ----------      |   Token        --------------       -----------------
                      |                     |
 
 ```
@@ -27,9 +27,9 @@ This proxy is designed to be an internet-facing gateway for proxying network tra
 
 - It should maybe support more features, like proxying beyond HTTP CONNECT, or allowlisting outbound domains
 
-- Users would need to customize this so the proxy only accepts their OIDC tokens, and not OIDC tokens from any Actions runner. This example is scoped to workflows in the private repo https://github.com/steiza/actions_testing, but the OIDC token means you could scope up to a whole org, or down to a specific workflow.
+- Users would need to customize this so the gateway only accepts their OIDC tokens, and not OIDC tokens from any Actions runner. This example is scoped to workflows in the private repo https://github.com/steiza/actions_testing, but the OIDC token means you could scope up to a whole org, or down to a specific workflow.
 
-- Users would be responsible for deploying the proxy with scoped access to their private network
+- Users would be responsible for deploying the gateway with scoped access to their private network
 
 ## How would I configure this?
 
@@ -75,11 +75,15 @@ jobs:
 
       - name: Get OIDC token
         run: |
-          curl -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" -H "Accept: application/json; api-version=2.0" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://ActionsOIDCProxy" | jq -r ".value" > token.txt
+          curl -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" -H "Accept: application/json; api-version=2.0" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://ActionsOIDCGateway" | jq -r ".value" > token.txt
 
-      - name: Contact proxy using OIDC token
+      - name: Example using gateway as a proxy
         run: |
-          curl -v --proxy-insecure -p --proxy-header "Proxy-Authorization: $(cat token.txt)" -x https://oidc-proxy-test.eastus.azurecontainer.io:8443 https://www.google.com
+          curl -v --proxy-insecure -p --proxy-header "Gateway-Authorization: $(cat token.txt)" -x https://oidc-proxy-test.eastus.azurecontainer.io:8443 https://www.google.com
+
+      - name: Example of an API gateway
+        run: |
+          curl -v --insecure -H "Gateway-Authorization: $(cat token.txt)" https://oidc-proxy-test.eastus.azurecontainer.io:8443/apiExample
 
     ...
 ```
