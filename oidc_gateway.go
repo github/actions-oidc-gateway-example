@@ -98,45 +98,6 @@ func transfer(destination io.WriteCloser, source io.ReadCloser) {
 	io.Copy(destination, source)
 }
 
-func handler(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodConnect && req.RequestURI != "/apiExample" {
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-		return
-	}
-
-	// Check that the OIDC token verifies as a valid token from GitHub
-	//
-	// This only means the OIDC token came from any GitHub Actions workflow,
-	// we *must* check claims specific to our use case below
-	oidcTokenString := string(req.Header.Get("Gateway-Authorization"))
-
-	claims, err := validateTokenCameFromGitHub(oidcTokenString)
-	if err != nil {
-		fmt.Println(err)
-		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-		return
-	}
-
-	// Token is valid, but we *must* check some claim specific to our use case
-	//
-	// For examples of other claims you could check, see:
-	// https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-oidc-trust-with-the-cloud
-	//
-	// Here we check the same claims for all requests, but you could customize
-	// the claims you check per handler below
-	if claims["repository"] != "steiza/actions_testing" {
-		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-		return
-	}
-
-	// Now that claims have been verified, we can service the request
-	if req.Method == http.MethodConnect {
-		handleProxyRequest(w, req)
-	} else if req.RequestURI == "/apiExample" {
-		handleApiRequest(w)
-	}
-}
-
 func handleProxyRequest(w http.ResponseWriter, req *http.Request) {
 	proxyConn, err := net.DialTimeout("tcp", req.Host, 5*time.Second)
 	if err != nil {
@@ -175,6 +136,45 @@ func handleApiRequest(w http.ResponseWriter) {
 
 	defer resp.Body.Close()
 	io.Copy(w, resp.Body)
+}
+
+func handler(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodConnect && req.RequestURI != "/apiExample" {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
+
+	// Check that the OIDC token verifies as a valid token from GitHub
+	//
+	// This only means the OIDC token came from any GitHub Actions workflow,
+	// we *must* check claims specific to our use case below
+	oidcTokenString := string(req.Header.Get("Gateway-Authorization"))
+
+	claims, err := validateTokenCameFromGitHub(oidcTokenString)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	// Token is valid, but we *must* check some claim specific to our use case
+	//
+	// For examples of other claims you could check, see:
+	// https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-oidc-trust-with-the-cloud
+	//
+	// Here we check the same claims for all requests, but you could customize
+	// the claims you check per handler below
+	if claims["repository"] != "steiza/actions_testing" {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	// Now that claims have been verified, we can service the request
+	if req.Method == http.MethodConnect {
+		handleProxyRequest(w, req)
+	} else if req.RequestURI == "/apiExample" {
+		handleApiRequest(w)
+	}
 }
 
 func main() {
