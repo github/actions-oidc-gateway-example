@@ -30,11 +30,7 @@ type JWKS struct {
 	Keys []JWK
 }
 
-func getKeyForToken(token *jwt.Token) (interface{}, error) {
-	if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-		return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
-	}
-
+func getJwksString() ([]byte, error) {
 	resp, err := http.Get("https://token.actions.githubusercontent.com/.well-known/jwks")
 	if err != nil {
 		fmt.Println(err)
@@ -47,39 +43,55 @@ func getKeyForToken(token *jwt.Token) (interface{}, error) {
 		return nil, fmt.Errorf("Unable to get JWKS configuration")
 	}
 
-	var jwks JWKS
-	if err = json.Unmarshal(jwksString, &jwks); err != nil {
-		return nil, fmt.Errorf("Unable to parse JWKS")
-	}
-
-	for _, jwk := range jwks.Keys {
-		if jwk.Kid == token.Header["kid"] {
-			nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
-			if err != nil {
-				return nil, fmt.Errorf("Unable to parse key")
-			}
-			var n big.Int
-
-			eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
-			if err != nil {
-				return nil, fmt.Errorf("Unable to parse key")
-			}
-			var e big.Int
-
-			key := rsa.PublicKey{
-				N: n.SetBytes(nBytes),
-				E: int(e.SetBytes(eBytes).Uint64()),
-			}
-
-			return &key, nil
-		}
-	}
-
-	return nil, fmt.Errorf("Unknown kid: %v", token.Header["kid"])
+	return jwksString, nil
 }
 
-func validateTokenCameFromGitHub(oidcTokenString string) (jwt.MapClaims, error) {
-	oidcToken, err := jwt.Parse(string(oidcTokenString), getKeyForToken)
+func getKeyForTokenMaker(getJwks func() ([]byte, error)) func(*jwt.Token) (interface{}, error) {
+	jwksString, err := getJwks()
+
+	return func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("Unable to get JWKS configuration")
+		}
+
+		var jwks JWKS
+		if err = json.Unmarshal(jwksString, &jwks); err != nil {
+			return nil, fmt.Errorf("Unable to parse JWKS")
+		}
+
+		for _, jwk := range jwks.Keys {
+			if jwk.Kid == token.Header["kid"] {
+				nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
+				if err != nil {
+					return nil, fmt.Errorf("Unable to parse key")
+				}
+				var n big.Int
+
+				eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
+				if err != nil {
+					return nil, fmt.Errorf("Unable to parse key")
+				}
+				var e big.Int
+
+				key := rsa.PublicKey{
+					N: n.SetBytes(nBytes),
+					E: int(e.SetBytes(eBytes).Uint64()),
+				}
+
+				return &key, nil
+			}
+		}
+
+		return nil, fmt.Errorf("Unknown kid: %v", token.Header["kid"])
+	}
+}
+
+func validateTokenCameFromGitHub(oidcTokenString string, getKeyFunc func(token *jwt.Token) (interface{}, error)) (jwt.MapClaims, error) {
+	oidcToken, err := jwt.Parse(string(oidcTokenString), getKeyFunc)
 	if err != nil || !oidcToken.Valid {
 		return nil, fmt.Errorf("Unable to validate JWT")
 	}
@@ -150,7 +162,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	// we *must* check claims specific to our use case below
 	oidcTokenString := string(req.Header.Get("Gateway-Authorization"))
 
-	claims, err := validateTokenCameFromGitHub(oidcTokenString)
+	claims, err := validateTokenCameFromGitHub(oidcTokenString, getKeyForTokenMaker(getJwksString))
 	if err != nil {
 		fmt.Println(err)
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
