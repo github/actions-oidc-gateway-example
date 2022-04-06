@@ -51,7 +51,7 @@ jobs:
 
       - name: Example of an API gateway
         run: |
-          curl -v -H "Gateway-Authorization: $(cat token.txt)" https://your-load-balancer/apiExample
+          curl -v -H "Gateway-Authorization: $(cat token.txt)" https://your-load-balancer.example.com/apiExample
 
     ...
 ```
