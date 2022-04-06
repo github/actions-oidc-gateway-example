@@ -189,7 +189,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	//
 	// Here we check the same claims for all requests, but you could customize
 	// the claims you check per handler below
-	if claims["repository"] != "steiza/actions_testing" {
+	if claims["repository"] != "octo-org/octo-repo" {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
@@ -208,11 +208,11 @@ func main() {
     getKeyForToken = getKeyForTokenMaker(getJwksStringMaker())
 
 	server := http.Server{
-		Addr:         ":8443",
+		Addr:         ":8000",
 		Handler:      http.HandlerFunc(handler),
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}
 
-	server.ListenAndServeTLS("/etc/cert.pem", "/etc/key.pem")
+	server.ListenAndServe()
 }
