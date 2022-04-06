@@ -30,20 +30,31 @@ type JWKS struct {
 	Keys []JWK
 }
 
-func getJwksString() ([]byte, error) {
-	resp, err := http.Get("https://token.actions.githubusercontent.com/.well-known/jwks")
-	if err != nil {
-		fmt.Println(err)
-		return nil, fmt.Errorf("Unable to get JWKS configuration")
-	}
+func getJwksStringMaker() (func() ([]byte, error)) {
+    lastUpdate := time.Now()
+    jwksString := []byte{}
 
-	jwksString, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Println(err)
-		return nil, fmt.Errorf("Unable to get JWKS configuration")
-	}
+    return func() ([]byte, error) {
+        now := time.Now()
 
-	return jwksString, nil
+        if now.Sub(lastUpdate) > time.Minute || len(jwksString) == 0 {
+            resp, err := http.Get("https://token.actions.githubusercontent.com/.well-known/jwks")
+            if err != nil {
+                fmt.Println(err)
+                return nil, fmt.Errorf("Unable to get JWKS configuration")
+            }
+
+            jwksString, err = ioutil.ReadAll(resp.Body)
+            if err != nil {
+                fmt.Println(err)
+                return nil, fmt.Errorf("Unable to get JWKS configuration")
+            }
+
+            lastUpdate = now
+        }
+
+        return jwksString, nil
+    }
 }
 
 func getKeyForTokenMaker(getJwks func() ([]byte, error)) func(*jwt.Token) (interface{}, error) {
@@ -150,6 +161,8 @@ func handleApiRequest(w http.ResponseWriter) {
 	io.Copy(w, resp.Body)
 }
 
+var getKeyForToken func(token *jwt.Token) (interface{}, error)
+
 func handler(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodConnect && req.RequestURI != "/apiExample" {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
@@ -162,7 +175,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	// we *must* check claims specific to our use case below
 	oidcTokenString := string(req.Header.Get("Gateway-Authorization"))
 
-	claims, err := validateTokenCameFromGitHub(oidcTokenString, getKeyForTokenMaker(getJwksString))
+	claims, err := validateTokenCameFromGitHub(oidcTokenString, getKeyForToken)
 	if err != nil {
 		fmt.Println(err)
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
@@ -191,6 +204,8 @@ func handler(w http.ResponseWriter, req *http.Request) {
 
 func main() {
 	fmt.Println("starting up")
+
+    getKeyForToken = getKeyForTokenMaker(getJwksStringMaker())
 
 	server := http.Server{
 		Addr:         ":8443",
