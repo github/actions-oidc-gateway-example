@@ -194,6 +194,18 @@ func handler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+    // You can customize the audience when you request an Actions OIDC token.
+    //
+    // This is a good idea to prevent a token being accidentally leaked by a
+    // service from being used in another service.
+    //
+    // The example in the README.md requests this specific custom audience.
+    if claims["aud"] != "api://ActionsOIDCGateway" {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+
+    }
+
 	// Now that claims have been verified, we can service the request
 	if req.Method == http.MethodConnect {
 		handleProxyRequest(w, req)
