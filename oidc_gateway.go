@@ -30,47 +30,19 @@ type JWKS struct {
 	Keys []JWK
 }
 
-func getJwksStringMaker() (func() ([]byte, error)) {
-    lastUpdate := time.Now()
-    jwksString := []byte{}
-
-    return func() ([]byte, error) {
-        now := time.Now()
-
-        if now.Sub(lastUpdate) > time.Minute || len(jwksString) == 0 {
-            resp, err := http.Get("https://token.actions.githubusercontent.com/.well-known/jwks")
-            if err != nil {
-                fmt.Println(err)
-                return nil, fmt.Errorf("Unable to get JWKS configuration")
-            }
-
-            jwksString, err = ioutil.ReadAll(resp.Body)
-            if err != nil {
-                fmt.Println(err)
-                return nil, fmt.Errorf("Unable to get JWKS configuration")
-            }
-
-            lastUpdate = now
-        }
-
-        return jwksString, nil
-    }
+type GatewayContext struct {
+	jwksCache      []byte
+	jwksLastUpdate time.Time
 }
 
-func getKeyForTokenMaker(getJwks func() ([]byte, error)) func(*jwt.Token) (interface{}, error) {
-	jwksString, err := getJwks()
-
+func getKeyFromJwks(jwksBytes []byte) func(*jwt.Token) (interface{}, error) {
 	return func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
 		}
 
-		if err != nil {
-			return nil, fmt.Errorf("Unable to get JWKS configuration")
-		}
-
 		var jwks JWKS
-		if err = json.Unmarshal(jwksString, &jwks); err != nil {
+		if err := json.Unmarshal(jwksBytes, &jwks); err != nil {
 			return nil, fmt.Errorf("Unable to parse JWKS")
 		}
 
@@ -101,8 +73,29 @@ func getKeyForTokenMaker(getJwks func() ([]byte, error)) func(*jwt.Token) (inter
 	}
 }
 
-func validateTokenCameFromGitHub(oidcTokenString string, getKeyFunc func(token *jwt.Token) (interface{}, error)) (jwt.MapClaims, error) {
-	oidcToken, err := jwt.Parse(string(oidcTokenString), getKeyFunc)
+func validateTokenCameFromGitHub(oidcTokenString string, gc *GatewayContext) (jwt.MapClaims, error) {
+	// Check if we have a recently cached JWKS
+	now := time.Now()
+
+	if now.Sub(gc.jwksLastUpdate) > time.Minute || len(gc.jwksCache) == 0 {
+		resp, err := http.Get("https://token.actions.githubusercontent.com/.well-known/jwks")
+		if err != nil {
+			fmt.Println(err)
+			return nil, fmt.Errorf("Unable to get JWKS configuration")
+		}
+
+		jwksBytes, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Println(err)
+			return nil, fmt.Errorf("Unable to get JWKS configuration")
+		}
+
+		gc.jwksCache = jwksBytes
+		gc.jwksLastUpdate = now
+	}
+
+	// Attempt to validate JWT with JWKS
+	oidcToken, err := jwt.Parse(string(oidcTokenString), getKeyFromJwks(gc.jwksCache))
 	if err != nil || !oidcToken.Valid {
 		return nil, fmt.Errorf("Unable to validate JWT")
 	}
@@ -161,9 +154,7 @@ func handleApiRequest(w http.ResponseWriter) {
 	io.Copy(w, resp.Body)
 }
 
-var getKeyForToken func(token *jwt.Token) (interface{}, error)
-
-func handler(w http.ResponseWriter, req *http.Request) {
+func (gatewayContext *GatewayContext) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodConnect && req.RequestURI != "/apiExample" {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
@@ -175,7 +166,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	// we *must* check claims specific to our use case below
 	oidcTokenString := string(req.Header.Get("Gateway-Authorization"))
 
-	claims, err := validateTokenCameFromGitHub(oidcTokenString, getKeyForToken)
+	claims, err := validateTokenCameFromGitHub(oidcTokenString, gatewayContext)
 	if err != nil {
 		fmt.Println(err)
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
@@ -194,17 +185,17 @@ func handler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-    // You can customize the audience when you request an Actions OIDC token.
-    //
-    // This is a good idea to prevent a token being accidentally leaked by a
-    // service from being used in another service.
-    //
-    // The example in the README.md requests this specific custom audience.
-    if claims["aud"] != "api://ActionsOIDCGateway" {
+	// You can customize the audience when you request an Actions OIDC token.
+	//
+	// This is a good idea to prevent a token being accidentally leaked by a
+	// service from being used in another service.
+	//
+	// The example in the README.md requests this specific custom audience.
+	if claims["aud"] != "api://ActionsOIDCGateway" {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 
-    }
+	}
 
 	// Now that claims have been verified, we can service the request
 	if req.Method == http.MethodConnect {
@@ -217,11 +208,11 @@ func handler(w http.ResponseWriter, req *http.Request) {
 func main() {
 	fmt.Println("starting up")
 
-    getKeyForToken = getKeyForTokenMaker(getJwksStringMaker())
+	gatewayContext := &GatewayContext{jwksLastUpdate: time.Now()}
 
 	server := http.Server{
 		Addr:         ":8000",
-		Handler:      http.HandlerFunc(handler),
+		Handler:      gatewayContext,
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}

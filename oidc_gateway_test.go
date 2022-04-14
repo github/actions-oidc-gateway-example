@@ -5,8 +5,8 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
-	//"fmt"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt"
 )
@@ -25,12 +25,8 @@ func TestGetKeyForTokenMaker(t *testing.T) {
 	jwk.E = "AQAB"
 
 	jwks := JWKS{Keys: []JWK{jwk}}
-
-	getJwksString := func() ([]byte, error) {
-		return json.Marshal(jwks)
-	}
-
-	getKeyForToken := getKeyForTokenMaker(getJwksString)
+	jwksBytes, _ := json.Marshal(jwks)
+	getKeyFunc := getKeyFromJwks(jwksBytes)
 
 	// Test token referencing known key
 	tokenClaims := jwt.MapClaims{"for": "testing"}
@@ -38,7 +34,7 @@ func TestGetKeyForTokenMaker(t *testing.T) {
 
 	token.Header["kid"] = "testKey"
 
-	key, err := getKeyForToken(token)
+	key, err := getKeyFunc(token)
 	if err != nil {
 		t.Error(err)
 	}
@@ -48,7 +44,7 @@ func TestGetKeyForTokenMaker(t *testing.T) {
 
 	// Test token referencing unknown key
 	token.Header["kid"] = "unknownKey"
-	key, err = getKeyForToken(token)
+	key, err = getKeyFunc(token)
 	if err == nil {
 		t.Error("Should fail when passed unknown key")
 	}
@@ -56,7 +52,7 @@ func TestGetKeyForTokenMaker(t *testing.T) {
 	// Test token fails with any other signing key than RSA
 	tokenHmac := jwt.NewWithClaims(jwt.SigningMethodHS256, tokenClaims)
 
-	key, err = getKeyForToken(tokenHmac)
+	key, err = getKeyFunc(tokenHmac)
 	if err == nil {
 		t.Error("Should fail any signing algorithm other than RSA")
 	}
@@ -76,12 +72,9 @@ func TestValidateTokenCameFromGitHub(t *testing.T) {
 	jwk.E = "AQAB"
 
 	jwks := JWKS{Keys: []JWK{jwk}}
+	jwksBytes, _ := json.Marshal(jwks)
 
-	getJwksString := func() ([]byte, error) {
-		return json.Marshal(jwks)
-	}
-
-	getKeyForToken := getKeyForTokenMaker(getJwksString)
+	gatewayContext := &GatewayContext{jwksCache: jwksBytes, jwksLastUpdate: time.Now()}
 
 	// Test token signed in the expected way
 	tokenClaims := jwt.MapClaims{"for": "testing"}
@@ -93,7 +86,7 @@ func TestValidateTokenCameFromGitHub(t *testing.T) {
 		panic(err)
 	}
 
-	claims, err := validateTokenCameFromGitHub(signedToken, getKeyForToken)
+	claims, err := validateTokenCameFromGitHub(signedToken, gatewayContext)
 
 	if err != nil {
 		t.Error(err)
@@ -113,7 +106,7 @@ func TestValidateTokenCameFromGitHub(t *testing.T) {
 		panic(err)
 	}
 
-	claims, err = validateTokenCameFromGitHub(signedToken, getKeyForToken)
+	claims, err = validateTokenCameFromGitHub(signedToken, gatewayContext)
 	if err == nil {
 		t.Error("Should not validate token signed with other key")
 	}
@@ -124,7 +117,7 @@ func TestValidateTokenCameFromGitHub(t *testing.T) {
 
 	noneToken, err := token.SignedString("none signing method allowed")
 
-	claims, err = validateTokenCameFromGitHub(noneToken, getKeyForToken)
+	claims, err = validateTokenCameFromGitHub(noneToken, gatewayContext)
 	if err == nil {
 		t.Error("Should not validate unsigned token")
 	}
