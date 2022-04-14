@@ -3,7 +3,8 @@ name: Run CI
 on:
   push:
     branches: [ main ]
-    paths: *.go
+    paths:
+      - *.go
 
 jobs:
   run_ci:
