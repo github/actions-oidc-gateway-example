@@ -1,6 +1,6 @@
-# actions-oidc-proxy-example
+# actions-oidc-gateway-example
 
-[![Run CI](https://github.com/github/actions-oidc-proxy-example/actions/workflows/ci.yml/badge.svg)](https://github.com/github/actions-oidc-proxy-example/actions/workflows/ci.yml)
+[![Run CI](https://github.com/github/actions-oidc-gateway-example/actions/workflows/ci.yml/badge.svg)](https://github.com/github/actions-oidc-gateway-example/actions/workflows/ci.yml)
 
 Have you ever wanted to connect to a private network from a GitHub-hosted Actions runner?
 

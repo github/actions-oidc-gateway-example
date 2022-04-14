@@ -25,6 +25,7 @@ func TestGetKeyForTokenMaker(t *testing.T) {
 	jwk.E = "AQAB"
 
 	jwks := JWKS{Keys: []JWK{jwk}}
+
 	jwksBytes, _ := json.Marshal(jwks)
 	getKeyFunc := getKeyFromJwks(jwksBytes)
 
