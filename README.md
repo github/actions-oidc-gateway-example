@@ -1,5 +1,7 @@
 # actions-oidc-proxy-example
 
+[![Run CI](https://github.com/github/actions-oidc-proxy-example/actions/workflows/ci.yml/badge.svg)](https://github.com/github/actions-oidc-proxy-example/actions/workflows/ci.yml)
+
 Have you ever wanted to connect to a private network from a GitHub-hosted Actions runner?
 
 This gateway is a reference implementation of how to authorize traffic from Actions into your private network, either as an API gateway or as an HTTP CONNECT proxy tunnel.
