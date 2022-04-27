@@ -43,17 +43,18 @@ jobs:
     steps:
       ...
 
-      - name: Get OIDC token
+      - name: Get OIDC token and set OIDC_TOKEN environment variable
         run: |
-          curl -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" -H "Accept: application/json; api-version=2.0" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://ActionsOIDCGateway" | jq -r ".value" > token.txt
+          echo "OIDC_TOKEN=$(curl -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" -H "Accept: application/json; api-version=2.0" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://ActionsOIDCGateway" | jq -r ".value")"  >> $GITHUB_ENV
+          echo "::add-mask::$OIDC_TOKEN"
 
       - name: Example of using gateway as a proxy
         run: |
-          curl -v -p --proxy-header "Gateway-Authorization: $(cat token.txt)" -x https://your-load-balancer.example.com https://www.google.com
+          curl -v -p --proxy-header "Gateway-Authorization: ${{ env.OIDC_TOKEN }}" -x https://your-load-balancer.example.com https://www.google.com
 
       - name: Example of an API gateway
         run: |
-          curl -v -H "Gateway-Authorization: $(cat token.txt)" https://your-load-balancer.example.com/apiExample
+          curl -v -H "Gateway-Authorization: ${{ env.OIDC_TOKEN }}" https://your-load-balancer.example.com/apiExample
 
     ...
 ```
