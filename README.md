@@ -32,7 +32,7 @@ flowchart LR
 
 Once you customize and deploy your gateway, you can configure your Actions workflow to make use of it:
 
-```
+```yaml
 ...
 
 jobs:
