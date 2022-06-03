@@ -1,101 +1,23 @@
 package main
 
 import (
-	"crypto/rsa"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"math/big"
 	"net"
 	"net/http"
 	"time"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/MicahParks/keyfunc"
+	"github.com/golang-jwt/jwt/v4"
 )
 
-type JWK struct {
-	N   string
-	Kty string
-	Kid string
-	Alg string
-	E   string
-	Use string
-	X5c []string
-	X5t string
-}
-
-type JWKS struct {
-	Keys []JWK
-}
-
 type GatewayContext struct {
-	jwksCache      []byte
-	jwksLastUpdate time.Time
-}
-
-func getKeyFromJwks(jwksBytes []byte) func(*jwt.Token) (interface{}, error) {
-	return func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
-		}
-
-		var jwks JWKS
-		if err := json.Unmarshal(jwksBytes, &jwks); err != nil {
-			return nil, fmt.Errorf("Unable to parse JWKS")
-		}
-
-		for _, jwk := range jwks.Keys {
-			if jwk.Kid == token.Header["kid"] {
-				nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
-				if err != nil {
-					return nil, fmt.Errorf("Unable to parse key")
-				}
-				var n big.Int
-
-				eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
-				if err != nil {
-					return nil, fmt.Errorf("Unable to parse key")
-				}
-				var e big.Int
-
-				key := rsa.PublicKey{
-					N: n.SetBytes(nBytes),
-					E: int(e.SetBytes(eBytes).Uint64()),
-				}
-
-				return &key, nil
-			}
-		}
-
-		return nil, fmt.Errorf("Unknown kid: %v", token.Header["kid"])
-	}
+	jwks *keyfunc.JWKS
 }
 
 func validateTokenCameFromGitHub(oidcTokenString string, gc *GatewayContext) (jwt.MapClaims, error) {
-	// Check if we have a recently cached JWKS
-	now := time.Now()
-
-	if now.Sub(gc.jwksLastUpdate) > time.Minute || len(gc.jwksCache) == 0 {
-		resp, err := http.Get("https://token.actions.githubusercontent.com/.well-known/jwks")
-		if err != nil {
-			fmt.Println(err)
-			return nil, fmt.Errorf("Unable to get JWKS configuration")
-		}
-
-		jwksBytes, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			fmt.Println(err)
-			return nil, fmt.Errorf("Unable to get JWKS configuration")
-		}
-
-		gc.jwksCache = jwksBytes
-		gc.jwksLastUpdate = now
-	}
-
 	// Attempt to validate JWT with JWKS
-	oidcToken, err := jwt.Parse(string(oidcTokenString), getKeyFromJwks(gc.jwksCache))
+	oidcToken, err := jwt.Parse(string(oidcTokenString), gc.jwks.Keyfunc)
 	if err != nil || !oidcToken.Valid {
 		return nil, fmt.Errorf("Unable to validate JWT")
 	}
@@ -208,11 +130,16 @@ func (gatewayContext *GatewayContext) ServeHTTP(w http.ResponseWriter, req *http
 func main() {
 	fmt.Println("starting up")
 
-	gatewayContext := &GatewayContext{jwksLastUpdate: time.Now()}
+	jwks, err := keyfunc.Get("https://token.actions.githubusercontent.com/.well-known/jwks", keyfunc.Options{
+		RefreshInterval: time.Minute,
+	})
+	if err != nil {
+		panic(err)
+	}
 
 	server := http.Server{
 		Addr:         ":8000",
-		Handler:      gatewayContext,
+		Handler:      &GatewayContext{jwks: jwks},
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}
