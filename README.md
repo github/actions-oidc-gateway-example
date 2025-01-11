@@ -10,7 +10,7 @@ It is *not* intended to be used as-is.
 
 At a minimum, you'd want to customize the claim check for your use case (see [Configuring the OIDC trust with the cloud](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-oidc-trust-with-the-cloud) for examples as to what's possible here). The default configuration only allows Actions from the repo `octo-org/octo-repo`.
 
-Then, if you're using this as an API gateway, you probably want to customize the existing `/apiExample` handler (unless you **really** need proxied acccess to the Bing homepage?) You could add additional handlers, and even customize the claim checking per handler if you'd like.
+Then, if you're using this as an API gateway, you probably want to customize the existing `/apiExample` handler (unless you **really** need proxied access to the Bing homepage?) You could add additional handlers, and even customize the claim checking per handler if you'd like.
 
 Lastly, you are responsible for deploying this gateway in a secure way with access to your private network. There's lots of different options here, but you probably want this gateway to be behind a load balancer that speaks TLS, with scoped network access to the private services it provides access to. That will probably look something like this:
 
