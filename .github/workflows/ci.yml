@@ -1,4 +1,6 @@
 name: Run CI
+permissions:
+  contents: read
 
 on:
   push:
