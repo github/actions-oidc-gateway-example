@@ -1,0 +1,31 @@
+name: test merge queue
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - 'gh-readonly-queue/**'
+  merge_group:
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  statuses: read
+  id-token: write
+  attestations: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/attest-build-provenance/predicate@36fa7d009e22618ca7cd599486979b8150596c74 # predicate@1.1.4
+        id: generate-build-provenance-predicate
+      - uses: actions/attest@v2.2.0
+        id: attest
+        with:
+          subject-path: README.md
+          predicate-type: ${{ steps.generate-build-provenance-predicate.outputs.predicate-type }}
+          predicate: ${{ steps.generate-build-provenance-predicate.outputs.predicate }}
+          show-summary: true
