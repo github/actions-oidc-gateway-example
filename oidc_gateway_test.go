@@ -45,7 +45,7 @@ func TestGetKeyForTokenMaker(t *testing.T) {
 
 	// Test token referencing unknown key
 	token.Header["kid"] = "unknownKey"
-	key, err = getKeyFunc(token)
+	_, err = getKeyFunc(token)
 	if err == nil {
 		t.Error("Should fail when passed unknown key")
 	}
@@ -53,7 +53,7 @@ func TestGetKeyForTokenMaker(t *testing.T) {
 	// Test token fails with any other signing key than RSA
 	tokenHmac := jwt.NewWithClaims(jwt.SigningMethodHS256, tokenClaims)
 
-	key, err = getKeyFunc(tokenHmac)
+	_, err = getKeyFunc(tokenHmac)
 	if err == nil {
 		t.Error("Should fail any signing algorithm other than RSA")
 	}
@@ -107,18 +107,18 @@ func TestValidateTokenCameFromGitHub(t *testing.T) {
 		panic(err)
 	}
 
-	claims, err = validateTokenCameFromGitHub(signedToken, gatewayContext)
+	_, err = validateTokenCameFromGitHub(signedToken, gatewayContext)
 	if err == nil {
 		t.Error("Should not validate token signed with other key")
 	}
 
 	// Test unsigned token is not allowed
-	unsigendToken := jwt.NewWithClaims(jwt.SigningMethodNone, tokenClaims)
-	unsigendToken.Header["kid"] = "testKey"
+	unsignedToken := jwt.NewWithClaims(jwt.SigningMethodNone, tokenClaims)
+	unsignedToken.Header["kid"] = "testKey"
 
-	noneToken, err := token.SignedString("none signing method allowed")
+	noneToken, _ := token.SignedString("none signing method allowed")
 
-	claims, err = validateTokenCameFromGitHub(noneToken, gatewayContext)
+	_, err = validateTokenCameFromGitHub(noneToken, gatewayContext)
 	if err == nil {
 		t.Error("Should not validate unsigned token")
 	}
